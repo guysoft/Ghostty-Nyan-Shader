@@ -175,7 +175,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float jumpStrength = smoothstep(cell.x * 1.2, cell.x * 3.0, jumpDist);
 
     float dt = max(iTime - iTimeCursorChange, 0.0);
-    float trailLife = 0.55;                 // seconds the trail is visible
+    float trailLife = 0.4;                  // seconds the trail is visible
     float trailAlpha = exp(-dt / trailLife * 2.5) * jumpStrength;
     float nyanVisible = smoothstep(0.0, 0.08, trailAlpha);
 
@@ -204,10 +204,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             float catCutoff = 1.0 - clamp(catLen / segLen, 0.0, 0.9);
 
             if (along < catCutoff) {
-                // signed perpendicular position across the band, in [-1,1]
-                // Use the direction-perpendicular to give a stable "top"
+                // signed perpendicular position across the band, in [-1,1].
+                // Force the normal to point DOWN on screen (Y-down frag,
+                // so nrm.y >= 0). Without this, leftward motion flips the
+                // rainbow vertically — red ends up at the bottom of the
+                // band instead of the top.
                 vec2 dir = normalize(curCenter - prvCenter);
                 vec2 nrm = vec2(-dir.y, dir.x);
+                if (nrm.y < 0.0) nrm = -nrm;
                 float perp = dot(P - mix(prvCenter, curCenter, along), nrm);
                 float v = perp / bandH;     // [-1, 1]
                 float stripeIdx = floor((v * 0.5 + 0.5) * 6.0);
@@ -250,19 +254,26 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // ---- draw the nyan body at the current cursor ----
     // Empirically Ghostty's fragCoord uses Y-down (screen-top = Y 0), so we
     // negate Y to get into our internal "cat-world" space where +Y = up.
-    // Cat then sits in cat-space, oriented so +X is its nose. We rotate
-    // cat-world by `angle` so the nose points along the direction of the
-    // last cursor move; equivalently, we counter-rotate fragment-relative
-    // coords by -angle before sampling the cat SDF.
+    // Cat sits in cat-space oriented so +X is its nose.
     //
-    // When prv≈cur (cursor hasn't really moved), angle = 0 → cat faces
-    // right (default). After any meaningful jump, iPreviousCursor sticks
-    // at the pre-jump position, so the angle is latched until the next
-    // jump even as the cat fades out.
+    // Naive approach: rotate cat-space by atan(dir) so the nose follows
+    // the motion. Problem: rightward → angle 0 (ok), leftward → angle π
+    // which rotates the cat 180° → cat ends up upside-down AND facing
+    // backwards. Standard 2D sprite trick: keep the rotation in the
+    // "front half" (cos(angle) > 0, i.e. nose-on-the-right) and apply a
+    // horizontal mirror to make the cat physically face leftward. This
+    // way the cat's belly always points down on screen.
     float angle = 0.0;
+    float flipX = 1.0;
     if (jumpDist > 0.5) {
-        // negate Y because frag-down → cat-up
-        angle = atan(-toCur.y, toCur.x);
+        angle = atan(-toCur.y, toCur.x);     // frag-down → cat-up: negate Y
+        if (toCur.x < 0.0) {
+            // moving leftward: rotate the angle back into the front half
+            // (so the cat is upright) and mirror cat-space X so the head
+            // visually faces left.
+            angle += 3.14159265358979;
+            flipX = -1.0;
+        }
     }
     float ca = cos(angle);
     float sa = sin(angle);
@@ -272,6 +283,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // R(-angle) * r  =  [ca, sa; -sa, ca] * r
     vec2 local = vec2( ca * r.x + sa * r.y,
                       -sa * r.x + ca * r.y);
+    local.x *= flipX;                        // horizontal mirror for left motion
 
     vec4 cat = drawNyan(local, cell, iTime);
     cat.a *= nyanVisible;
