@@ -165,15 +165,22 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 P = fragCoord;  // pixel coord
 
     // ---- visibility envelope ----
-    // Nyan (cat + trail + stars) is a motion effect. When the cursor sits
-    // idle, the cat fades out and Ghostty's default block cursor takes over.
+    // Nyan (cat + trail + stars) is a motion effect. Two gates compose:
+    //   1. trailAlpha — exponential decay since the last cursor move.
+    //   2. jumpStrength — how far the cursor jumped. Per-character typing
+    //      moves the cursor 1 cell, which would otherwise re-trigger nyan
+    //      on every keystroke. Require ≥ ~2 cells to consider it a jump.
+    vec2 toCur = curCenter - prvCenter;
+    float jumpDist = length(toCur);
+    float jumpStrength = smoothstep(cell.x * 1.2, cell.x * 3.0, jumpDist);
+
     float dt = max(iTime - iTimeCursorChange, 0.0);
     float trailLife = 0.55;                 // seconds the trail is visible
-    float trailAlpha = exp(-dt / trailLife * 2.5);
+    float trailAlpha = exp(-dt / trailLife * 2.5) * jumpStrength;
     float nyanVisible = smoothstep(0.0, 0.08, trailAlpha);
 
     // hide the default block cursor under us, but only while nyan is on
-    // screen — when idle, let the normal cursor render through.
+    // screen — when idle (or just typing), let the normal cursor through.
     vec2 dCur = abs(P - curCenter) - curSize * 0.5;
     if (max(dCur.x, dCur.y) < 0.0 && nyanVisible > 0.05) {
         base.rgb = mix(base.rgb, iBackgroundColor.rgb, nyanVisible);
@@ -181,8 +188,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     vec3 outCol = base.rgb;
 
-    float segLen = distance(prvCenter, curCenter);
-    if (segLen > cell.x * 0.5 && trailAlpha > 0.01) {
+    float segLen = jumpDist;
+    if (segLen > cell.x * 1.2 && trailAlpha > 0.01) {
         vec2 si = segInfo(P, prvCenter, curCenter);
         float distPerp = si.x;
         float along = si.y;                 // 0 at prev, 1 at cur
@@ -226,7 +233,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     }
 
     // ---- shimmer stars trailing behind ----
-    if (segLen > cell.x * 0.5 && trailAlpha > 0.01) {
+    if (segLen > cell.x * 1.2 && trailAlpha > 0.01) {
         for (int i = 0; i < 3; i++) {
             float fi = float(i);
             float t = fract(0.15 + fi * 0.27 - iTime * 0.6);
@@ -241,11 +248,31 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     }
 
     // ---- draw the nyan body at the current cursor ----
-    // Cat alpha is gated on nyanVisible so it disappears when the cursor
-    // has been stationary for ~trailLife seconds. This means: typing
-    // normally → no cat. Jump the cursor → nyan flies in with the trail,
-    // then fades back to the default block cursor.
-    vec2 local = P - curCenter;
+    // Empirically Ghostty's fragCoord uses Y-down (screen-top = Y 0), so we
+    // negate Y to get into our internal "cat-world" space where +Y = up.
+    // Cat then sits in cat-space, oriented so +X is its nose. We rotate
+    // cat-world by `angle` so the nose points along the direction of the
+    // last cursor move; equivalently, we counter-rotate fragment-relative
+    // coords by -angle before sampling the cat SDF.
+    //
+    // When prv≈cur (cursor hasn't really moved), angle = 0 → cat faces
+    // right (default). After any meaningful jump, iPreviousCursor sticks
+    // at the pre-jump position, so the angle is latched until the next
+    // jump even as the cat fades out.
+    float angle = 0.0;
+    if (jumpDist > 0.5) {
+        // negate Y because frag-down → cat-up
+        angle = atan(-toCur.y, toCur.x);
+    }
+    float ca = cos(angle);
+    float sa = sin(angle);
+
+    vec2 r = P - curCenter;
+    r.y = -r.y;                              // flip frag-down to cat Y-up
+    // R(-angle) * r  =  [ca, sa; -sa, ca] * r
+    vec2 local = vec2( ca * r.x + sa * r.y,
+                      -sa * r.x + ca * r.y);
+
     vec4 cat = drawNyan(local, cell, iTime);
     cat.a *= nyanVisible;
     outCol = over(outCol, cat);
