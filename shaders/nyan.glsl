@@ -225,7 +225,17 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                 // fade-in near the head, fade-out at the tail
                 float headFade = smoothstep(catCutoff, catCutoff - 0.05, along);
                 float tailFade = smoothstep(0.0, 0.05, along);
-                float a = trailAlpha * headFade * tailFade;
+
+                // Per-position lifetime: pretend the cat took `travelTime`
+                // seconds to traverse the segment. The prv end of the trail
+                // is the "oldest" (cat passed it travelTime ago) and the
+                // cur end is the "newest" (cat just arrived). Each point
+                // gets its own exp() decay so the trail dies tail-first,
+                // like a comet, instead of fading uniformly as one block.
+                float travelTime = 0.18;
+                float age = dt + travelTime * (1.0 - along);
+                float localAlpha = exp(-age / trailLife * 2.5) * jumpStrength;
+                float a = localAlpha * headFade * tailFade;
 
                 outCol = mix(outCol, sc, a);
 
@@ -237,7 +247,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     }
 
     // ---- shimmer stars trailing behind ----
+    // Same per-position decay as the rainbow band: stars near the prv end
+    // of the trail (t→1, far from the cat) are "older" than stars near
+    // the cat (t→0), so they fade out first.
     if (segLen > cell.x * 1.2 && trailAlpha > 0.01) {
+        const float travelTime = 0.18;
         for (int i = 0; i < 3; i++) {
             float fi = float(i);
             float t = fract(0.15 + fi * 0.27 - iTime * 0.6);
@@ -246,7 +260,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             sp += vec2(sin(iTime * 4.0 + fi), cos(iTime * 3.5 + fi * 2.0))
                   * cell.y * 0.35;
             float ds = sdCircle(P - sp, cell.y * 0.06);
-            float sa = smoothstep(0.0, -cell.y * 0.06, ds) * trailAlpha * 0.8;
+            float starAge = dt + travelTime * t;
+            float starAlpha = exp(-starAge / trailLife * 2.5) * jumpStrength;
+            float sa = smoothstep(0.0, -cell.y * 0.06, ds) * starAlpha * 0.8;
             outCol = mix(outCol, vec3(1.0), sa);
         }
     }
