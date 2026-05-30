@@ -176,13 +176,17 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     float dt = max(iTime - iTimeCursorChange, 0.0);
 
-    // Two separate decay tracks so the cat "morphs" into the block cursor
-    // quickly, while the rainbow trail keeps lingering behind as a comet:
-    //   - catLife is short → cat fades in ~0.3s, revealing the block cursor.
-    //   - trailLife is longer → rainbow/stars keep going for ~0.5s+.
-    float catLife = 0.18;
-    float trailLife = 0.4;
-    float catAlpha   = exp(-dt / catLife   * 2.5) * jumpStrength;
+    // Two separate decay tracks so the cat "morphs" into the block cursor,
+    // while the rainbow trail lingers behind as a comet:
+    //   - catLife: cat stays at full opacity until 60% of catLife elapsed,
+    //     then fades over the remaining 40%. NOT exponential — that
+    //     started fading the cat from t=0 and made it look like it died
+    //     in a fraction of catLife regardless of how big the value was.
+    //   - trailLife: keeps exponential decay so the comet smoothly trails.
+    float catLife = 1.28;
+    float trailLife = 1.7;
+    float catFade = clamp(dt / catLife, 0.0, 1.0);
+    float catAlpha = smoothstep(1.0, 0.6, catFade) * jumpStrength;
     float trailAlpha = exp(-dt / trailLife * 2.5) * jumpStrength;
     float nyanVisible = smoothstep(0.0, 0.08, trailAlpha);
 
@@ -312,10 +316,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     local.x *= flipX;                        // horizontal mirror for left motion
 
     // Implosion morph: as catAlpha falls, scale `local` UP so the cat SDF
-    // is sampled further from origin → cat shrinks toward curCenter. By
-    // the time catAlpha hits 0 the cat is invisible AND collapsed to a
-    // point, hiding the geometry change under the alpha fade.
-    float shrink = mix(2.2, 1.0, catAlpha);  // 1.0 full size, 2.2 → tiny
+    // is sampled further from origin → cat shrinks toward curCenter. Tied
+    // to a separate `shrinkProgress` rather than catAlpha directly so the
+    // shrink only kicks in during the LAST stretch of the fade (when
+    // catAlpha drops below 0.3). Otherwise the cat visibly shrinks well
+    // before its alpha fades, making the whole thing look much shorter
+    // than catLife.
+    float shrinkProgress = smoothstep(0.3, 0.0, catAlpha);
+    float shrink = mix(1.0, 2.2, shrinkProgress);
     local *= shrink;
 
     vec4 cat = drawNyan(local, cell, iTime);
