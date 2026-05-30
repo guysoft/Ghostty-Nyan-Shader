@@ -183,8 +183,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     //     started fading the cat from t=0 and made it look like it died
     //     in a fraction of catLife regardless of how big the value was.
     //   - trailLife: keeps exponential decay so the comet smoothly trails.
-    float catLife = 1.28;
-    float trailLife = 1.7;
+    float catLife = 0.18;
+    float trailLife = 0.7;
     float catFade = clamp(dt / catLife, 0.0, 1.0);
     float catAlpha = smoothstep(1.0, 0.6, catFade) * jumpStrength;
     float trailAlpha = exp(-dt / trailLife * 2.5) * jumpStrength;
