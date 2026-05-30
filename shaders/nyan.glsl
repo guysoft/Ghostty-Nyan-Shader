@@ -175,15 +175,25 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float jumpStrength = smoothstep(cell.x * 1.2, cell.x * 3.0, jumpDist);
 
     float dt = max(iTime - iTimeCursorChange, 0.0);
-    float trailLife = 0.4;                  // seconds the trail is visible
+
+    // Two separate decay tracks so the cat "morphs" into the block cursor
+    // quickly, while the rainbow trail keeps lingering behind as a comet:
+    //   - catLife is short → cat fades in ~0.3s, revealing the block cursor.
+    //   - trailLife is longer → rainbow/stars keep going for ~0.5s+.
+    float catLife = 0.18;
+    float trailLife = 0.4;
+    float catAlpha   = exp(-dt / catLife   * 2.5) * jumpStrength;
     float trailAlpha = exp(-dt / trailLife * 2.5) * jumpStrength;
     float nyanVisible = smoothstep(0.0, 0.08, trailAlpha);
 
-    // hide the default block cursor under us, but only while nyan is on
-    // screen — when idle (or just typing), let the normal cursor through.
+    // Crossfade-mask the default block cursor with catAlpha. While the cat
+    // is at full opacity, the cursor under it is painted out with the
+    // background color (invisible). As catAlpha → 0 the mask lifts and
+    // Ghostty's own cursor (already drawn into iChannel0) bleeds through,
+    // producing a clean "cat dissolves into cursor block" visual.
     vec2 dCur = abs(P - curCenter) - curSize * 0.5;
-    if (max(dCur.x, dCur.y) < 0.0 && nyanVisible > 0.05) {
-        base.rgb = mix(base.rgb, iBackgroundColor.rgb, nyanVisible);
+    if (max(dCur.x, dCur.y) < 0.0 && catAlpha > 0.01) {
+        base.rgb = mix(base.rgb, iBackgroundColor.rgb, catAlpha);
     }
 
     vec3 outCol = base.rgb;
@@ -301,8 +311,15 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                       -sa * r.x + ca * r.y);
     local.x *= flipX;                        // horizontal mirror for left motion
 
+    // Implosion morph: as catAlpha falls, scale `local` UP so the cat SDF
+    // is sampled further from origin → cat shrinks toward curCenter. By
+    // the time catAlpha hits 0 the cat is invisible AND collapsed to a
+    // point, hiding the geometry change under the alpha fade.
+    float shrink = mix(2.2, 1.0, catAlpha);  // 1.0 full size, 2.2 → tiny
+    local *= shrink;
+
     vec4 cat = drawNyan(local, cell, iTime);
-    cat.a *= nyanVisible;
+    cat.a *= catAlpha;
     outCol = over(outCol, cat);
 
     fragColor = vec4(outCol, 1.0);
