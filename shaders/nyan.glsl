@@ -176,37 +176,45 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     float dt = max(iTime - iTimeCursorChange, 0.0);
 
-    // Two separate decay tracks so the cat "morphs" into the block cursor,
-    // while the rainbow trail lingers behind as a comet:
-    //   - catLife: cat stays at full opacity until 60% of catLife elapsed,
-    //     then fades over the remaining 40%. NOT exponential — that
-    //     started fading the cat from t=0 and made it look like it died
-    //     in a fraction of catLife regardless of how big the value was.
-    //   - trailLife: keeps exponential decay so the comet smoothly trails.
+    // The cat now actually flies from the previous cursor position to the
+    // current one (instead of appearing instantly at curCenter). catLife is
+    // the post-flight morph/fade duration; flyDuration controls travel speed.
+    // trailLife keeps exponential decay so the comet smoothly trails.
+    float flyDuration = 0.24;
     float catLife = 0.18;
     float trailLife = 0.7;
-    float catFade = clamp(dt / catLife, 0.0, 1.0);
-    float catAlpha = smoothstep(1.0, 0.6, catFade) * jumpStrength;
-    float trailAlpha = exp(-dt / trailLife * 2.5) * jumpStrength;
+    float flyT = clamp(dt / flyDuration, 0.0, 1.0);
+    float flyProgress = flyT * flyT * (3.0 - 2.0 * flyT); // smoothstep
+    vec2 flyCenter = mix(prvCenter, curCenter, flyProgress);
+
+    float morphT = clamp((dt - flyDuration) / catLife, 0.0, 1.0);
+    float catFade = morphT;
+    float catAlpha = (1.0 - smoothstep(0.6, 1.0, catFade)) * jumpStrength;
+    float trailDt = max(dt - flyDuration, 0.0);
+    float trailAlpha = exp(-trailDt / trailLife * 2.5) * jumpStrength;
     float nyanVisible = smoothstep(0.0, 0.08, trailAlpha);
 
-    // Crossfade-mask the default block cursor with catAlpha. While the cat
-    // is at full opacity, the cursor under it is painted out with the
-    // background color (invisible). As catAlpha → 0 the mask lifts and
-    // Ghostty's own cursor (already drawn into iChannel0) bleeds through,
-    // producing a clean "cat dissolves into cursor block" visual.
+    // Crossfade-mask the default block cursor with catAlpha, but only once
+    // the flying cat gets close to the destination. This leaves the block
+    // cursor visible as a target while nyan is in flight, which makes the
+    // direction of travel easier to follow.
     vec2 dCur = abs(P - curCenter) - curSize * 0.5;
-    if (max(dCur.x, dCur.y) < 0.0 && catAlpha > 0.01) {
-        base.rgb = mix(base.rgb, iBackgroundColor.rgb, catAlpha);
+    float destinationMask = smoothstep(0.75, 1.0, flyProgress) * catAlpha;
+    if (max(dCur.x, dCur.y) < 0.0 && destinationMask > 0.01) {
+        base.rgb = mix(base.rgb, iBackgroundColor.rgb, destinationMask);
     }
 
     vec3 outCol = base.rgb;
 
     float segLen = jumpDist;
-    if (segLen > cell.x * 1.2 && trailAlpha > 0.01) {
-        vec2 si = segInfo(P, prvCenter, curCenter);
+    float maxTrailLen = cell.x * 8.0;
+    float tailProgress = max(0.0, flyProgress - maxTrailLen / max(segLen, 1.0));
+    vec2 tailCenter = mix(prvCenter, curCenter, tailProgress);
+    float liveTrailLen = distance(tailCenter, flyCenter);
+    if (segLen > cell.x * 1.2 && liveTrailLen > cell.x * 0.5 && trailAlpha > 0.01) {
+        vec2 si = segInfo(P, tailCenter, flyCenter);
         float distPerp = si.x;
-        float along = si.y;                 // 0 at prev, 1 at cur
+        float along = si.y;                 // 0 at tail, 1 at cat
 
         // band half-height = cursor height * 0.45 → ~ cursor-tall stripes
         float bandH = cell.y * 0.45;
@@ -215,7 +223,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             // We only want the trail BEHIND the cat, not under it.
             // Cat occupies roughly the last ~1.6 cell widths of the segment.
             float catLen = cell.x * 1.6;
-            float catCutoff = 1.0 - clamp(catLen / segLen, 0.0, 0.9);
+            float catCutoff = 1.0 - clamp(catLen / liveTrailLen, 0.0, 0.9);
 
             if (along < catCutoff) {
                 // signed perpendicular position across the band, in [-1,1].
@@ -223,10 +231,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                 // so nrm.y >= 0). Without this, leftward motion flips the
                 // rainbow vertically — red ends up at the bottom of the
                 // band instead of the top.
-                vec2 dir = normalize(curCenter - prvCenter);
+                vec2 dir = normalize(flyCenter - tailCenter);
                 vec2 nrm = vec2(-dir.y, dir.x);
                 if (nrm.y < 0.0) nrm = -nrm;
-                float perp = dot(P - mix(prvCenter, curCenter, along), nrm);
+                float perp = dot(P - mix(tailCenter, flyCenter, along), nrm);
                 float v = perp / bandH;     // [-1, 1]
                 float stripeIdx = floor((v * 0.5 + 0.5) * 6.0);
                 stripeIdx = clamp(stripeIdx, 0.0, 5.0);
@@ -247,7 +255,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                 // gets its own exp() decay so the trail dies tail-first,
                 // like a comet, instead of fading uniformly as one block.
                 float travelTime = 0.18;
-                float age = dt + travelTime * (1.0 - along);
+                float age = trailDt + travelTime * (1.0 - along);
                 float localAlpha = exp(-age / trailLife * 2.5) * jumpStrength;
                 float a = localAlpha * headFade * tailFade;
 
@@ -264,17 +272,17 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // Same per-position decay as the rainbow band: stars near the prv end
     // of the trail (t→1, far from the cat) are "older" than stars near
     // the cat (t→0), so they fade out first.
-    if (segLen > cell.x * 1.2 && trailAlpha > 0.01) {
+    if (segLen > cell.x * 1.2 && liveTrailLen > cell.x * 0.5 && trailAlpha > 0.01) {
         const float travelTime = 0.18;
         for (int i = 0; i < 3; i++) {
             float fi = float(i);
             float t = fract(0.15 + fi * 0.27 - iTime * 0.6);
-            vec2 sp = mix(curCenter, prvCenter, t);
+            vec2 sp = mix(flyCenter, tailCenter, t);
             // jitter
             sp += vec2(sin(iTime * 4.0 + fi), cos(iTime * 3.5 + fi * 2.0))
                   * cell.y * 0.35;
             float ds = sdCircle(P - sp, cell.y * 0.06);
-            float starAge = dt + travelTime * t;
+            float starAge = trailDt + travelTime * t;
             float starAlpha = exp(-starAge / trailLife * 2.5) * jumpStrength;
             float sa = smoothstep(0.0, -cell.y * 0.06, ds) * starAlpha * 0.8;
             outCol = mix(outCol, vec3(1.0), sa);
@@ -308,7 +316,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float ca = cos(angle);
     float sa = sin(angle);
 
-    vec2 r = P - curCenter;
+    vec2 r = P - flyCenter;
     r.y = -r.y;                              // flip frag-down to cat Y-up
     // R(-angle) * r  =  [ca, sa; -sa, ca] * r
     vec2 local = vec2( ca * r.x + sa * r.y,
