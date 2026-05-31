@@ -207,7 +207,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 outCol = base.rgb;
 
     float segLen = jumpDist;
-    float maxTrailLen = cell.x * 8.0;
+    float maxTrailLen = cell.x * 10.0;
     float tailProgress = max(0.0, flyProgress - maxTrailLen / max(segLen, 1.0));
     vec2 tailCenter = mix(prvCenter, curCenter, tailProgress);
     float liveTrailLen = distance(tailCenter, flyCenter);
