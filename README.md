@@ -33,6 +33,12 @@ The legs wiggle continuously while nyan is visible (`sin(iTime * 14)`).
    mkdir -p "$HOME/.config/ghostty/shaders"
    curl -fsSL https://raw.githubusercontent.com/guysoft/Ghostty-Nyan-Shader/main/shaders/nyan.glsl \
      -o "$HOME/.config/ghostty/shaders/nyan.glsl"
+
+   # Most Linux Ghostty builds (GTK/OpenGL/Vulkan) use the opposite fragment
+   # Y convention from macOS/Metal. If you skip this and the cat is upside
+   # down, apply this line and reload Ghostty.
+   sed -i 's/const float NYAN_Y_SIGN = -1.0;/const float NYAN_Y_SIGN = 1.0;/' \
+     "$HOME/.config/ghostty/shaders/nyan.glsl"
    ```
 
 2. Add to your Ghostty config (`~/Library/Application Support/com.mitchellh.ghostty/config` on macOS, `~/.config/ghostty/config` on Linux):
@@ -51,13 +57,13 @@ The legs wiggle continuously while nyan is visible (`sin(iTime * 14)`).
 
 3. Reload Ghostty: **`⌘⇧,`** on macOS / **`Ctrl+Shift+,`** on Linux. If the shader doesn't appear, fully restart Ghostty.
 
-4. If the cat is upside down on Linux, edit the top of `nyan.glsl` and flip the platform coordinate knob:
+4. If the cat is upside down, edit the top of `nyan.glsl` and flip the platform coordinate knob:
 
    ```glsl
    const float NYAN_Y_SIGN = 1.0;
    ```
 
-   Default is `-1.0`, which matches the macOS/Metal behavior this shader was tuned on. Some Linux Ghostty builds appear to expose the opposite fragment Y convention.
+   Default is `-1.0`, which matches the macOS/Metal behavior this shader was tuned on. Linux GTK/OpenGL builds commonly need `1.0`.
 
 A ready-to-include snippet is in [`ghostty.example.conf`](./ghostty.example.conf).
 
