@@ -11,6 +11,11 @@
 //   iTimeCursorChange    = iTime at last cursor move
 //   iChannel0            = terminal framebuffer below the shader
 
+// Platform coordinate knob:
+// macOS Ghostty/Metal has fragCoord Y-down in practice, so the cat needs -1.
+// If the cat is upside down on Linux/OpenGL/Vulkan, set this to 1.0.
+const float NYAN_Y_SIGN = -1.0;
+
 // ---------- helpers ----------
 float sdSegment(vec2 p, vec2 a, vec2 b) {
     vec2 pa = p - a;
@@ -290,8 +295,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     }
 
     // ---- draw the nyan body at the current cursor ----
-    // Empirically Ghostty's fragCoord uses Y-down (screen-top = Y 0), so we
-    // negate Y to get into our internal "cat-world" space where +Y = up.
+    // Convert the platform's fragment Y convention into our internal
+    // "cat-world" space where +Y = up. macOS/Metal needs NYAN_Y_SIGN=-1;
+    // if Linux shows the cat upside down, set NYAN_Y_SIGN=1 at the top.
     // Cat sits in cat-space oriented so +X is its nose.
     //
     // Naive approach: rotate cat-space by atan(dir) so the nose follows
@@ -304,7 +310,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float angle = 0.0;
     float flipX = 1.0;
     if (jumpDist > 0.5) {
-        angle = atan(-toCur.y, toCur.x);     // frag-down → cat-up: negate Y
+        angle = atan(NYAN_Y_SIGN * toCur.y, toCur.x);
         if (toCur.x < 0.0) {
             // moving leftward: rotate the angle back into the front half
             // (so the cat is upright) and mirror cat-space X so the head
@@ -317,7 +323,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float sa = sin(angle);
 
     vec2 r = P - flyCenter;
-    r.y = -r.y;                              // flip frag-down to cat Y-up
+    r.y *= NYAN_Y_SIGN;                      // platform frag Y → cat Y-up
     // R(-angle) * r  =  [ca, sa; -sa, ca] * r
     vec2 local = vec2( ca * r.x + sa * r.y,
                       -sa * r.x + ca * r.y);

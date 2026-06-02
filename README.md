@@ -51,6 +51,14 @@ The legs wiggle continuously while nyan is visible (`sin(iTime * 14)`).
 
 3. Reload Ghostty: **`⌘⇧,`** on macOS / **`Ctrl+Shift+,`** on Linux. If the shader doesn't appear, fully restart Ghostty.
 
+4. If the cat is upside down on Linux, edit the top of `nyan.glsl` and flip the platform coordinate knob:
+
+   ```glsl
+   const float NYAN_Y_SIGN = 1.0;
+   ```
+
+   Default is `-1.0`, which matches the macOS/Metal behavior this shader was tuned on. Some Linux Ghostty builds appear to expose the opposite fragment Y convention.
+
 A ready-to-include snippet is in [`ghostty.example.conf`](./ghostty.example.conf).
 
 ## Uninstall / disable
@@ -84,6 +92,7 @@ Common knobs at the top of [`shaders/nyan.glsl`](./shaders/nyan.glsl):
 
 | What | Where | Default |
 | --- | --- | --- |
+| Cat upside-down fix | `const float NYAN_Y_SIGN = -1.0;` | `-1.0` on macOS, try `1.0` on Linux |
 | Trail lifetime (s) | `float trailLife = 0.55;` | `0.55` |
 | Trail fade rate | `exp(-dt / trailLife * 2.5)` | `2.5` (higher = snappier) |
 | Stripe band thickness | `float bandH = cell.y * 0.45;` | `0.45 ×` cursor height |
