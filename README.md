@@ -4,6 +4,10 @@ A custom cursor shader for [Ghostty](https://ghostty.org) that turns your text c
 
 The cat itself is drawn entirely procedurally with signed distance fields — no image textures (Ghostty's `custom-shader` doesn't expose any sampler other than the terminal contents). At the size of one terminal cell it reads as a tiny pop-tart with a grey cat head poking out and two wiggling legs. The rainbow is what really sells it.
 
+## Demo
+
+![Nyan Cat cursor demo](assets/nyan-demo.gif)
+
 ## Behavior
 
 - **Idle**: normal Ghostty block cursor. No nyan.
