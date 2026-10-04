@@ -223,12 +223,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
         // band half-height = cursor height * 0.45 → ~ cursor-tall stripes
         float bandH = cell.y * 0.45;
+        float waveAmplitude = cell.y * 0.12;
 
-        if (distPerp < bandH) {
-            // We only want the trail BEHIND the cat, not under it.
-            // Cat occupies roughly the last ~1.6 cell widths of the segment.
-            float catLen = cell.x * 1.6;
-            float catCutoff = 1.0 - clamp(catLen / liveTrailLen, 0.0, 0.9);
+        if (distPerp < bandH + waveAmplitude) {
+            // End the trail just inside the pop-tart body so the opaque cat
+            // covers the join without leaving a background-colored seam.
+            float catScale = min(cell.x, cell.y * 0.55);
+            float catBackDistance = catScale * 1.05;
+            float catCutoff = 1.0 - clamp(catBackDistance / liveTrailLen, 0.0, 0.9);
 
             if (along < catCutoff) {
                 // signed perpendicular position across the band, in [-1,1].
@@ -240,35 +242,39 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                 vec2 nrm = vec2(-dir.y, dir.x);
                 if (nrm.y < 0.0) nrm = -nrm;
                 float perp = dot(P - mix(tailCenter, flyCenter, along), nrm);
-                float v = perp / bandH;     // [-1, 1]
-                float stripeIdx = floor((v * 0.5 + 0.5) * 6.0);
-                stripeIdx = clamp(stripeIdx, 0.0, 5.0);
-                vec3 sc = rainbowStripe(stripeIdx);
+                float waveEnvelope = sin(3.14159265358979 * clamp(along / max(catCutoff, 0.0001), 0.0, 1.0));
+                float waveOffset = sin(along * 16.0 - iTime * 8.0) * waveAmplitude * waveEnvelope;
+                float v = (perp - waveOffset) / bandH;
 
-                // wavy shimmer along the trail
-                float wob = sin(along * 18.0 - iTime * 12.0) * 0.04;
-                sc += wob;
+                if (abs(v) < 1.0) {
+                    float stripeIdx = floor((v * 0.5 + 0.5) * 6.0);
+                    stripeIdx = clamp(stripeIdx, 0.0, 5.0);
+                    vec3 sc = rainbowStripe(stripeIdx);
 
-                // fade-in near the head, fade-out at the tail
-                float headFade = smoothstep(catCutoff, catCutoff - 0.05, along);
-                float tailFade = smoothstep(0.0, 0.05, along);
+                    // wavy shimmer along the trail
+                    float wob = sin(along * 18.0 - iTime * 12.0) * 0.04;
+                    sc += wob;
 
-                // Per-position lifetime: pretend the cat took `travelTime`
-                // seconds to traverse the segment. The prv end of the trail
-                // is the "oldest" (cat passed it travelTime ago) and the
-                // cur end is the "newest" (cat just arrived). Each point
-                // gets its own exp() decay so the trail dies tail-first,
-                // like a comet, instead of fading uniformly as one block.
-                float travelTime = 0.18;
-                float age = trailDt + travelTime * (1.0 - along);
-                float localAlpha = exp(-age / trailLife * 2.5) * jumpStrength;
-                float a = localAlpha * headFade * tailFade;
+                    // fade-out at the tail; the head end stays opaque under the cat
+                    float tailFade = smoothstep(0.0, 0.05, along);
 
-                outCol = mix(outCol, sc, a);
+                    // Per-position lifetime: pretend the cat took `travelTime`
+                    // seconds to traverse the segment. The prv end of the trail
+                    // is the "oldest" (cat passed it travelTime ago) and the
+                    // cur end is the "newest" (cat just arrived). Each point
+                    // gets its own exp() decay so the trail dies tail-first,
+                    // like a comet, instead of fading uniformly as one block.
+                    float travelTime = 0.18;
+                    float age = trailDt + travelTime * (1.0 - along);
+                    float localAlpha = exp(-age / trailLife * 2.5) * jumpStrength;
+                    float a = localAlpha * tailFade;
 
-                // bright edge on the very outer stripes for pop
-                float edge = smoothstep(0.95, 1.0, abs(v));
-                outCol = mix(outCol, vec3(1.0), edge * a * 0.6);
+                    outCol = mix(outCol, sc, a);
+
+                    // bright edge on the very outer stripes for pop
+                    float edge = smoothstep(0.95, 1.0, abs(v));
+                    outCol = mix(outCol, vec3(1.0), edge * a * 0.6);
+                }
             }
         }
     }

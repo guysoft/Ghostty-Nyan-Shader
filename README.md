@@ -1,27 +1,30 @@
-# Ghostty Nyan Shader
+# Nyan Cursor Shader for Ghostty and Kitty
 
-A custom cursor shader for [Ghostty](https://ghostty.org) that turns your text cursor into 🌈 **Nyan Cat** 🐱 with a 6-stripe rainbow trail whenever it jumps.
+Custom cursor shaders for [Ghostty](https://ghostty.org) and [kitty](https://sw.kovidgoyal.net/kitty/) that turn your text cursor into 🌈 **Nyan Cat** 🐱 with a 6-stripe rainbow trail whenever it jumps.
 
-The cat itself is drawn entirely procedurally with signed distance fields — no image textures (Ghostty's `custom-shader` doesn't expose any sampler other than the terminal contents). At the size of one terminal cell it reads as a tiny pop-tart with a grey cat head poking out and two wiggling legs. The rainbow is what really sells it.
+The cat itself is drawn entirely procedurally with signed distance fields — no image textures. At the size of one terminal cell it reads as a tiny pop-tart with a grey cat head poking out and two wiggling legs. The rainbow is what really sells it.
 
 ## Demo
 
-![Nyan Cat cursor demo](assets/nyan-demo.gif)
+![Nyan Cat cursor demo in Ghostty](assets/nyan-demo.gif)
 
 ## Behavior
 
-- **Idle**: normal Ghostty block cursor. No nyan.
+- **Idle**: normal terminal block cursor. No nyan.
 - **Cursor jumps** (arrow keys, `Ctrl+A`/`Ctrl+E`, mouse click, scrolling, etc.): nyan flies in at the new cursor position with a rainbow streak connecting old → new, plus a few shimmer stars trailing behind.
-- **After ~0.5 s of stillness**: nyan fades out, default cursor returns.
+- **After ~0.5 s of stillness**: nyan fades out and the default cursor returns.
 
-The legs wiggle continuously while nyan is visible (`sin(iTime * 14)`).
+The legs wiggle continuously while Nyan is visible (`sin(time * 14)`).
 
 ## Requirements
 
-- **Ghostty ≥ 1.0** (anything that supports `custom-shader`, `iCurrentCursor`, `iPreviousCursor`, `iTimeCursorChange`).
-- macOS, Linux — anywhere Ghostty itself runs. The shader is plain GLSL/Shadertoy syntax with no platform-specific bits.
+- **Ghostty ≥ 1.0** for [`shaders/nyan.glsl`](./shaders/nyan.glsl).
+- **kitty ≥ 0.49** for [`shaders/kitty/nyan.slang`](./shaders/kitty/nyan.slang). Custom shaders were added in kitty 0.49.
+- macOS or Linux — anywhere the corresponding terminal and its custom-shader API run.
 
 ## Install
+
+### Ghostty
 
 1. Drop the shader file somewhere Ghostty can read:
 
@@ -71,48 +74,92 @@ The legs wiggle continuously while nyan is visible (`sin(iTime * 14)`).
 
 A ready-to-include snippet is in [`ghostty.example.conf`](./ghostty.example.conf).
 
+### kitty
+
+1. Install both the Slang shader and its pipeline in kitty's shader directory:
+
+   ```sh
+   mkdir -p "$HOME/.config/kitty/shaders"
+   curl -fsSL https://raw.githubusercontent.com/guysoft/Ghostty-Nyan-Shader/main/shaders/kitty/nyan.slang \
+     -o "$HOME/.config/kitty/shaders/nyan.slang"
+   curl -fsSL https://raw.githubusercontent.com/guysoft/Ghostty-Nyan-Shader/main/shaders/kitty/nyan.pipeline \
+     -o "$HOME/.config/kitty/shaders/nyan.pipeline"
+   ```
+
+2. Add these settings to `~/.config/kitty/kitty.conf`:
+
+   ```conf
+   cursor_trail 1
+   cursor_trail_start_threshold 2 2
+   custom_shaders nyan
+
+   # Recommended: let the shader own the cursor animation.
+   cursor_blink_interval 0
+   ```
+
+   `cursor_trail` must be enabled because kitty exposes cursor movement geometry to custom shaders through its trail system. The Nyan pipeline subscribes to that system and replaces kitty's built-in trail while active.
+
+3. Reload kitty's configuration or restart kitty.
+
+A ready-to-include snippet is in [`kitty.example.conf`](./kitty.example.conf).
+
 ## Uninstall / disable
 
-Comment out the two `custom-shader*` lines in your Ghostty config and reload. No other state to clean up.
+- **Ghostty:** comment out the two `custom-shader*` lines and reload.
+- **kitty:** comment out `custom_shaders nyan`. You can also disable `cursor_trail` if nothing else uses it.
 
 ## How it works
 
-The shader runs as a post-process pass over the terminal framebuffer (`iChannel0`). For each fragment it:
+Both versions run as a post-process pass over the rendered terminal. For each fragment, they:
 
-1. Samples the terminal contents underneath.
-2. Reads `iTime - iTimeCursorChange` to compute a `trailAlpha` that decays exponentially after each cursor move. Everything nyan-related is gated on this so the effect is invisible when idle.
-3. If the cursor moved far enough, draws a rainbow band along the segment from `iPreviousCursor.xy → iCurrentCursor.xy`, sliced into 6 horizontal stripes (red/orange/yellow/green/blue/purple). The portion of the segment under the cat is cut out so the rainbow looks like it's coming out of nyan's tail end.
-4. Adds a few jittered shimmer stars that drift along the trail.
-5. Draws the cat (pop-tart body + procedural sprinkles + grey cat head + ears + eyes + cheeks + wiggling legs) centered at the current cursor.
-6. Masks out Ghostty's default block cursor underneath nyan so they don't double up.
+1. Sample the terminal contents underneath.
+2. Compute an exponentially decaying visibility envelope from the most recent cursor movement time. Everything Nyan-related is gated on this so the effect is invisible when idle.
+3. If the cursor moved far enough, draw a rainbow band along the previous → current cursor segment, sliced into 6 stripes (red/orange/yellow/green/blue/purple). The portion of the segment under the cat is cut out so the rainbow looks like it is coming out of Nyan's tail end.
+4. Add a few jittered shimmer stars that drift along the trail.
+5. Draw the cat (pop-tart body + procedural sprinkles + grey cat head + ears + eyes + cheeks + wiggling legs) centered at the current cursor.
+6. Mask out the default block cursor underneath Nyan so they do not double up.
 
-The cursor-coordinate convention follows [`KroneCorylus/ghostty-shader-playground`](https://github.com/KroneCorylus/ghostty-shader-playground)'s `cursor_smear.glsl`: `iCurrentCursor.xy` is already in `fragCoord` space (Y-up), with `.y` being the **top edge** of the cursor box, so `center = xy + (halfW, -halfH)` — no `iResolution.y - y` flip needed.
+The host-specific inputs are mapped as follows:
+
+| State | Ghostty GLSL | kitty Slang |
+| --- | --- | --- |
+| Current cursor | `iCurrentCursor` | `cursor_trail_edge` |
+| Previous cursor | `iPreviousCursor` | `cursor_trail_prev_edge` |
+| Movement time | `iTimeCursorChange` | `cursor_trail_change_time` |
+| Terminal pixels | `iChannel0` | incoming `color` / backbuffer |
+| Animation trigger | always animated | `cursor-trail-move` event |
+
+The Ghostty coordinate convention follows [`KroneCorylus/ghostty-shader-playground`](https://github.com/KroneCorylus/ghostty-shader-playground)'s `cursor_smear.glsl`. The kitty port uses kitty's platform-independent lower-left, Y-up UV coordinates and converts them to pixel space before drawing.
 
 ## Limitations
 
-- **Single-segment trail.** Only the last cursor jump leaves a streak — fast typing won't accumulate a long continuous rainbow. Ghostty's shader pipeline doesn't expose a feedback buffer that would let us paint history across frames.
+- **Single-segment trail.** Only the last cursor jump leaves a streak — fast typing will not accumulate a long continuous rainbow. Both implementations intentionally track only the latest previous/current cursor pair.
 - **Tiny at default font size.** At ~7×16 px per cell (11 pt JetBrains Mono on Retina) the cat is more "tiny pixel nyan" than detailed sprite. The rainbow does the heavy lifting visually. Scale your font up if you want more detail.
-- **No external sprites.** Ghostty's `custom-shader` exposes only `iChannel0` (terminal contents) as a sampler. There is no way to load a real Nyan Cat PNG. The whole cat is SDFs.
-- **Selection / dim text under cursor.** The shader runs after Ghostty composites everything, so nyan overpaints selected text under the cursor. Visible only during the brief animation.
-- **Always-on animation.** `custom-shader-animation = true` re-renders the screen at the display refresh rate while the window is focused. Modest GPU load on Apple Silicon, more noticeable on integrated GPUs at 4K.
+- **No external sprites.** The implementations do not load a Nyan Cat PNG. The whole cat is built from SDFs.
+- **Selection / dim text under cursor.** The shaders run after the terminal composites everything, so Nyan overpaints selected text under the cursor. This is visible only during the brief animation.
+- **Ghostty animation cost.** `custom-shader-animation = true` re-renders the screen at the display refresh rate while the window is focused. kitty's version is event-driven and only activates its shader group for cursor trails.
 
 ## Tweaking
 
-Common knobs at the top of [`shaders/nyan.glsl`](./shaders/nyan.glsl):
+Common Ghostty knobs in [`shaders/nyan.glsl`](./shaders/nyan.glsl):
 
 | What | Where | Default |
 | --- | --- | --- |
 | Cat upside-down fix | `const float NYAN_Y_SIGN = -1.0;` | `-1.0` on macOS, try `1.0` on Linux |
-| Trail lifetime (s) | `float trailLife = 0.55;` | `0.55` |
+| Trail lifetime (s) | `float trailLife = 0.7;` | `0.7` |
 | Trail fade rate | `exp(-dt / trailLife * 2.5)` | `2.5` (higher = snappier) |
 | Stripe band thickness | `float bandH = cell.y * 0.45;` | `0.45 ×` cursor height |
+| Rainbow wave amplitude | `float waveAmplitude = cell.y * 0.12;` | `0.12 ×` cursor height |
 | Cat size | `float s = min(cellSize.x, cellSize.y * 0.55);` in `drawNyan` | `≈` cursor cell |
 | Leg wiggle speed | `sin(t * 14.0)` in `drawNyan` | `14` rad/s |
 | Number of shimmer stars | `for (int i = 0; i < 3; i++)` | `3` |
 
+The kitty equivalents are in [`shaders/kitty/nyan.slang`](./shaders/kitty/nyan.slang). Its main timing constants are `FLY_DURATION`, `CAT_LIFE`, and `TRAIL_LIFE` at the top of the file. kitty colors are converted from sRGB to linear RGB before compositing.
+
 ## Credits
 
 - [Ghostty](https://ghostty.org) by Mitchell Hashimoto — the actual terminal and its custom-shader hook.
+- [kitty](https://sw.kovidgoyal.net/kitty/) by Kovid Goyal — the Slang custom-shader pipeline and cursor-trail events used by the kitty port.
 - [`KroneCorylus/ghostty-shader-playground`](https://github.com/KroneCorylus/ghostty-shader-playground) — reference for Ghostty's cursor-coordinate conventions.
 - Nyan Cat © Christopher Torres / PRGuitarman — the original 2011 animation that this barely approximates.
 
